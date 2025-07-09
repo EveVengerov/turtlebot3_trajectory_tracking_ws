@@ -13,12 +13,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from typing import Tuple, List, Optional
+from tf_transformations import euler_from_quaternion
 
 # Define a colormap (e.g., "viridis" or "plasma")
 colormap = cm.get_cmap('viridis')
 
 # Constants
-SCAN_ANGLE = 360  # Angle covered by the LIDAR (in radians)
+SCAN_ANGLE = 360  # Angle covered by the LIDAR (in degrees)
 NUM_SECTORS = 36  # Number of sectors in the histogram
 MIN_DISTANCE = 1.0  # Minimum distance threshold (in meters)
 MAX_VELOCITY = 0.15  # Maximum linear velocity (m/s)
@@ -26,18 +27,6 @@ RANGE_MAX = 3.5
 
 ROBOT_RADIUS = 0.2
 SAFETY_MARGIN = 0.5
-
-def euler_from_quaternion(quat):
-    x, y, z, w = quat
-    sinr_cosp = 2 * (w * x + y * z)
-    cosr_cosp = 1 - 2 * (x * x + y * y)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
-    sinp = 2 * (w * y - z * x)
-    pitch = math.asin(sinp) if abs(sinp) < 1 else math.copysign(math.pi / 2, sinp)
-    siny_cosp = 2 * (w * z + x * y)
-    cosy_cosp = 1 - 2 * (y * y + z * z)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
-    return roll, pitch, yaw
 
 class HistogramWindowObstacleAvoidance:
     """
@@ -69,10 +58,6 @@ class HistogramWindowObstacleAvoidance:
         self.grid_size = 2.0  # 2.0 meters around the robot center
         self.resolution = 0.15  # Cell size (0.15 meters)
         
-        # Simple hysteresis to prevent oscillations
-        self.prev_steering_idx = 0
-        self.prev_steering_direction = "STRAIGHT"
-        self.hysteresis_threshold = 0  # Minimum sector difference to change direction
     
     def update_occupancy_grid(self, scan_data: List[float]) -> None:
         """
@@ -155,7 +140,7 @@ class HistogramWindowObstacleAvoidance:
     
     def find_best_steering_direction(self, target_theta_base_link: float) -> Tuple[int, float, str]:
         """
-        Find the best steering direction based on histogram data and target direction.
+        Find the best steering direction based on histogram data and target direction in base_link frame.
         
         Args:
             target_theta: Target direction in radians
@@ -163,26 +148,18 @@ class HistogramWindowObstacleAvoidance:
         Returns:
             Tuple of (best_steering_index, best_steering_angle, steering_direction)
         """
-
-        # test case
-        # target_theta = 0.0
-
         target_theta = target_theta_base_link  
 
         # Create polar histogram
         histogram = self.create_polar_histogram()
         # Log the histogram for debugging
-        print(f"Polar histogram: {[round(h, 2) for h in histogram]}")
+        # print(f"Polar histogram: {[round(h, 2) for h in histogram]}")
         
         # Mask unsafe sectors
         valid_sectors = histogram >= self.effective_radius
-        # print(f"Valid sectors: {valid_sectors}")
         
         # Create a mask for clear sectors with at least three consecutive valid sectors
         clear_sectors = np.zeros_like(valid_sectors, dtype=bool)
-
-    
-
         
         for i in range(len(valid_sectors)):
             # Check the current sector and its two consecutive neighbors
@@ -192,9 +169,6 @@ class HistogramWindowObstacleAvoidance:
                 clear_sectors[i] = True
         
         valid_sectors = clear_sectors
-
-        # print(f"Clear sectors: {clear_sectors}")
-
         
         # Warn if no valid sectors are found
         if not np.any(valid_sectors):
@@ -203,15 +177,12 @@ class HistogramWindowObstacleAvoidance:
         
         # Convert target_theta to index
         target_theta_unwrapped = (target_theta_base_link + 2 * np.pi) % (2 * np.pi)
-        print(f"Target theta base link: {target_theta_base_link*180/np.pi}")
         target_idx = int(np.rad2deg(target_theta_unwrapped) / (self.scan_angle / self.num_sectors))
 
-        print(f"Target index: {target_idx}, Target theta: {target_theta_unwrapped*180/np.pi}")
-
         if target_idx < self.num_sectors/2:
-            print(f"Target index is {target_idx} Direction is LEFT, histogram value is {histogram[target_idx]}")
+            print(f"[turtlebot3_histogram_window_controller] Target index is {target_idx} Direction is LEFT, histogram value is {histogram[target_idx]}")
         else:
-            print(f"Target index is {target_idx} Direction is RIGHT, histogram value is {histogram[target_idx]}")
+            print(f"[turtlebot3_histogram_window_controller] Target index is {target_idx} Direction is RIGHT, histogram value is {histogram[target_idx]}")
         
         best_steering_idx = target_idx
         best_steering_angle = np.deg2rad(target_idx * (self.scan_angle / self.num_sectors))
@@ -220,7 +191,7 @@ class HistogramWindowObstacleAvoidance:
         if valid_sectors[target_idx]:
             best_steering_idx = target_idx
             best_steering_angle = np.deg2rad(target_idx * (self.scan_angle / self.num_sectors))
-            best_steering_angle = target_theta_base_link#(best_steering_angle + np.pi) % (2 * np.pi) - np.pi  # Unwrap to [-pi, pi]
+            best_steering_angle = target_theta_base_link
             steering_direction = "TOWARD TARGET"  # Target direction is valid
         else:
             # Find closest valid direction to both sides of target
@@ -246,11 +217,11 @@ class HistogramWindowObstacleAvoidance:
                 closest_right_idx = valid_indices_right[np.argmin(target_idx - valid_indices_right)]
                 right_distance = n - closest_right_idx - target_idx
             
-            # Print distance values for debugging
-            print(f"Left distance: {left_distance:.2f} (closest_left_idx: {closest_left_idx})")
-            print(f"Right distance: {right_distance:.2f} (closest_right_idx: {closest_right_idx})")
-            print(f"N: {n}")
-            print(f"threshold for obstacle avoidance: {self.effective_radius}")
+            # # Print distance values for debugging
+            # print(f"[turtlebot3_histogram_window_controller] Left distance: {left_distance:.2f} (closest_left_idx: {closest_left_idx})")
+            # print(f"[turtlebot3_histogram_window_controller] Right distance: {right_distance:.2f} (closest_right_idx: {closest_right_idx})")
+            # print(f"[turtlebot3_histogram_window_controller] N: {n}")
+            # print(f"[turtlebot3_histogram_window_controller] threshold for obstacle avoidance: {self.effective_radius}")
             
             # If no sectors found on either side, wrap around
             if closest_left_idx is None and closest_right_idx is None:
@@ -260,11 +231,11 @@ class HistogramWindowObstacleAvoidance:
                 if left_distance <= right_distance and closest_left_idx is not None:
                     closest_idx = closest_left_idx
                     steering_direction = "LEFT"  # Higher index = LEFT
-                    print(f"Choosing LEFT: left_distance={left_distance:.2f} <= right_distance={right_distance:.2f}")
+                    print(f"[turtlebot3_histogram_window_controller] Choosing LEFT: left_distance={left_distance:.2f} <= right_distance={right_distance:.2f}")
                 elif closest_right_idx is not None:
                     closest_idx = closest_right_idx
                     steering_direction = "RIGHT"  # Lower index = RIGHT
-                    print(f"Choosing RIGHT: right_distance={right_distance:.2f} < left_distance={left_distance:.2f}")
+                    print(f"[turtlebot3_histogram_window_controller] Choosing RIGHT: right_distance={right_distance:.2f} < left_distance={left_distance:.2f}")
                 else:
                     # Fallback to left if right is not available
                     closest_idx = closest_left_idx
@@ -277,34 +248,11 @@ class HistogramWindowObstacleAvoidance:
                 steering_direction = "STRAIGHT"
             
             best_steering_idx = closest_idx
-
             best_steering_angle = np.deg2rad(closest_idx * (self.scan_angle / self.num_sectors))
 
             # Unwrap to [-pi, pi]
             if best_steering_angle > np.pi:
                 best_steering_angle = best_steering_angle - 2 * np.pi
-
-        # Apply hysteresis to prevent oscillations
-        sector_diff = abs(best_steering_idx - self.prev_steering_idx)
-        
-        # # If the change is small and we're not going straight, maintain previous direction
-        # if (sector_diff <= self.hysteresis_threshold and 
-        #     self.prev_steering_direction != "STRAIGHT" and
-        #     steering_direction != "STRAIGHT"):
-            
-        #     # Maintain previous direction
-        #     best_steering_idx = self.prev_steering_idx
-        #     best_steering_angle = np.deg2rad(best_steering_idx * (self.scan_angle / self.num_sectors))
-        #     if best_steering_angle > np.pi:
-        #         best_steering_angle = best_steering_angle - 2 * np.pi
-        #     steering_direction = self.prev_steering_direction
-        #     print(f"Hysteresis: Maintaining {steering_direction} (sector_diff={sector_diff} <= threshold={self.hysteresis_threshold})")
-        # else:
-        #     print(f"Direction change: {self.prev_steering_direction} -> {steering_direction} (sector_diff={sector_diff})")
-        
-        # Update previous values
-        self.prev_steering_direction = steering_direction
-        self.prev_steering_idx = best_steering_idx
         
         return best_steering_idx, best_steering_angle, steering_direction
     
@@ -399,7 +347,7 @@ class TurtleBotHistogramWindowController(Node):
         self.kp_angular = 2.0  # Angular velocity proportional gain
 
         # Target position (for P-controller) - set to a reasonable default
-        self.target_x = 4.0  # 2 meters forward
+        self.target_x = 4.0  # 4 meters forward
         self.target_y = 0.0  # No lateral offset
 
         # Debug mode - bypass obstacle avoidance for testing
@@ -433,7 +381,7 @@ class TurtleBotHistogramWindowController(Node):
         current_x = msg.pose.pose.position.x
         current_y = msg.pose.pose.position.y
         
-        # Extract orientation from quaternion
+        # Extract orientation from quaternion using TF transformations
         orientation_q = msg.pose.pose.orientation
         _, _, current_theta = euler_from_quaternion([
             orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w
@@ -467,19 +415,17 @@ class TurtleBotHistogramWindowController(Node):
             target_distance = math.sqrt(dx**2 + dy**2)
             target_theta = math.atan2(dy, dx)
 
-            angular_error = (target_theta)
-            target_theta_base_link = math.atan2(math.sin(angular_error), math.cos(angular_error))
-
-            # Debug information about target and current position
-            self.get_logger().info(
-                f'Target: ({self.target_x:.2f}, {self.target_y:.2f}), '
-                f'Current: ({current_x:.2f}, {current_y:.2f}), '
-                f'Distance: {target_distance:.2f}m, '
-                f'Target angle: {np.degrees(target_theta):.1f}°, '
-                f'Current angle: {np.degrees(current_theta):.1f}°'
-            )
-
+            # Calculate target angle in base_link frame
             target_theta_base_link = math.atan2(math.sin(target_theta - current_theta), math.cos(target_theta - current_theta))
+
+            # # Debug information about target and current position
+            # self.get_logger().info(
+            #     f'Target: ({self.target_x:.2f}, {self.target_y:.2f}), '
+            #     f'Current: ({current_x:.2f}, {current_y:.2f}), '
+            #     f'Distance: {target_distance:.2f}m, '
+            #     f'Target angle: {np.degrees(target_theta):.1f}°, '
+            #     f'Current angle: {np.degrees(current_theta):.1f}°'
+            # )
 
             # Apply Histogram obstacle avoidance control if LIDAR data is available
             if self.scan_data is not None and not self.debug_mode:
@@ -489,6 +435,7 @@ class TurtleBotHistogramWindowController(Node):
                 best_steering_theta = best_steering_theta_base_link + current_theta
                 best_steering_theta = (best_steering_theta + np.pi) % (2 * np.pi) - np.pi  # Unwrap to [-pi, pi]
 
+                print("----------------------------------------------------------------")
                 # Debug information
                 self.get_logger().info(
                     f'Obstacle Avoidance: steering_idx={best_steering_idx}, '
@@ -496,21 +443,19 @@ class TurtleBotHistogramWindowController(Node):
                     f'steering_direction={steering_direction}, '
                     f'original_target={np.degrees(target_theta):.1f}°'
                 )
-                target_theta = best_steering_theta
+                target_theta_difference = best_steering_theta_base_link
             else:
                 # In debug mode, use the original target angle
-                target_theta = target_theta_base_link
+                target_theta_difference = target_theta_base_link
                 self.get_logger().info(f'Debug mode: using original target angle {np.degrees(target_theta):.1f}°')
 
-            # target_theta = 180 * np.pi / 180
-
             # Calculate control errors
-            angular_error = best_steering_theta_base_link#math.atan2(math.sin(target_theta - current_theta), math.cos(target_theta - current_theta))
+            angular_error = target_theta_difference
             linear_error = target_distance
 
             # Apply P-control with improved logic
             # Allow turning even when close to target, but reduce linear velocity for large angular errors
-            angular_error_deg = abs(180 * angular_error / 3.14159)
+            angular_error_deg = abs(180 * angular_error / np.pi)
             
             if angular_error_deg > 5:  # Large angular error - prioritize turning
                 linear_velocity = 0.0
@@ -578,6 +523,9 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard Interrupt detected. Stopping the vehicle...')
         node.stop_vehicle()  # Stop the vehicle before shutting down
+    except Exception as e:
+        node.get_logger().error(f'Unexpected error: {e}')
+        node.stop_vehicle()  # Stop the vehicle on error
     finally:
         node.destroy_node()
         rclpy.shutdown()
