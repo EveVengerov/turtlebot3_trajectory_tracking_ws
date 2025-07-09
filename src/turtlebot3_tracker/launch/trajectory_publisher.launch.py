@@ -109,7 +109,7 @@ def generate_launch_description():
         # Launch arguments for control loop
         DeclareLaunchArgument(
             'control_frequency',
-            default_value='20.0',
+            default_value='50.0',
             description='Control loop frequency in Hz'
         ),
         

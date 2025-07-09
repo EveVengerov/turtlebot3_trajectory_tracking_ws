@@ -47,6 +47,7 @@ class TrajectoryPublisherNode(Node):
         self.current_trajectory_index = 0
         self.trajectory_start_time = None
         self.is_trajectory_active = False
+        self.previous_target_index = 0
         
         # Robot state
         self.current_pose = None
@@ -451,7 +452,10 @@ class TrajectoryPublisherNode(Node):
         # Find current target point in trajectory
         target_index = self._find_target_index(trajectory_time)
 
-        self.get_logger().info(f"Target index: {target_index}, / {len(self.trajectory_data['time'])-1}")
+        if target_index % 20 == 0 and target_index != self.previous_target_index: # Log only once every 20 target indices
+            self.get_logger().info(f"Target index: {target_index}, / {len(self.trajectory_data['time'])-1}")
+            self.previous_target_index = target_index
+
         
         if target_index >= len(self.trajectory_data['time'])-1:
             # Trajectory completed
