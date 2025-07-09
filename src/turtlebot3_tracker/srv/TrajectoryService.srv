@@ -1,0 +1,14 @@
+# Request
+float64[] waypoints_x
+float64[] waypoints_y
+float64 max_velocity
+float64 acceleration
+float64 deceleration
+string velocity_profile
+int32 num_points
+
+---
+# Response
+bool success
+string message
+nav_msgs/Path trajectory 
