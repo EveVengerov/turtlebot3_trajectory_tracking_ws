@@ -10,7 +10,7 @@ Check out README_HistogramWindowObstacleAvoidance.md for implementation details 
 
 ![Look Ahead Tracking Demo](assets/look_ahead_tracking.gif)
 
-Using PurePursuit/Looakahead Trajecetory tracking. The blue marker in rviz is lookahead point
+Using PurePursuit/Lookahead Trajectory tracking. The blue marker in rviz is lookahead point
 
 ### Obstacle Avoidance  
 **Demo Video:** 
@@ -58,8 +58,10 @@ Check out launch files for the real-time demonstration of both nodes: Trajectory
 
 1. Build the package:
 ```bash
+git clone <this-repo> --recursive
 cd ~/turtlebot3_trajectory_tracking_ws
-colcon build --packages-select turtlebot3_tracker
+colcon_build --packages-skip turtlebot3_tracker
+colcon build --packages-select turtlebot3_tracker --symlink-install
 source install/setup.bash
 ```
 
