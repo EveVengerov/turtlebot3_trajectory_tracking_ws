@@ -1,7 +1,7 @@
 # TurtleBot3 Trajectory Tracker
 
 This package provides trajectory generation and publishing capabilities for TurtleBot3 robots with support for both basic trajectory tracking and obstacle avoidance.
-Check out HistogramWindowObstacleAvoidance_README.md for implementation details of the obstacle avoidance algorithm.
+Check out README_HistogramWindowObstacleAvoidance.md for implementation details of the obstacle avoidance algorithm.
 
 ## Demo
 
