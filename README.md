@@ -9,11 +9,16 @@ This package provides trajectory generation and publishing capabilities for Turt
 
 ![Look Ahead Tracking Demo](assets/look_ahead_tracking.gif)
 
+Using PurePursuit/Looakahead Trajecetory tracking. The blue marker in rviz is lookahead point
+
 ### Obstacle Avoidance  
 **Demo Video:** 
 
 ![Obstacle Avoidance Demo](assets/histogram_window_obstacle_avoidance_demo.gif)
 
+Using Histogram Window Obstacle avoidance , a custom planner I made for the scenarios where a global map is unavailable, but robot has a target waypoint in global frame.
+
+Check out launch files for the real-time demonstration of both nodes: Trajectory Tracking, ad Trajectory Tracking with obstacle avoidance with rviz visualization
 
 ## Features
 
@@ -26,7 +31,7 @@ This package provides trajectory generation and publishing capabilities for Turt
   - Pure Pursuit controller
   - PID controller
   - Stanley controller
-- **Obstacle Avoidance**: Advanced obstacle avoidance using histogram-based algorithms
+- **Obstacle Avoidance**: Advanced obstacle avoidance using histogram-window obstacle avoidance
 - **ROS 2 Integration**: Publishes trajectory data to TurtleBot3-compatible topics
 - **Visualization**: RViz integration for real-time trajectory visualization
 
@@ -46,7 +51,7 @@ This package provides trajectory generation and publishing capabilities for Turt
 
 ## TF Transforms
 
-- Publishes robot pose as TF transform from `map` to `base_link`
+- Publishes robot pose as TF transform from `odom` to `base_link`
 
 ## Installation
 
