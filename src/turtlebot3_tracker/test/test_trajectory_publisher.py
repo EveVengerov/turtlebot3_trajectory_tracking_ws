@@ -3,8 +3,8 @@
 import unittest
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, Path
-from nav_msgs.msg import Path as NavPath
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Path
 import time
 
 
@@ -27,8 +27,8 @@ class TestTrajectoryPublisher(unittest.TestCase):
         )
         
         cls.path_sub = cls.node.create_subscription(
-            NavPath,
-            '/planned_path',
+            Path,
+            '/trajectory_path',
             cls.path_callback,
             10
         )
