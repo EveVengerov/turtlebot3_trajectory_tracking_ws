@@ -5,12 +5,11 @@ This package provides trajectory generation and publishing capabilities for Turt
 ## Demo
 
 ### Basic Trajectory Tracking
-**Demo Video:** [Look Ahead Tracking Demo](assets/look_ahead_tracking.webm)
+**Demo Video:** ![Look Ahead Tracking Demo](assets/look_ahead_tracking.mp4)
 
 ### Obstacle Avoidance  
-**Demo Video:** [Obstacle Avoidance Demo](assets/Obstacle_avoidance_demo.webm)
+**Demo Video:** ![Obstacle Avoidance Demo](assets/histogram_window_obstacle_avoidance_demo.mp4)
 
-*Note: Click the links above to view the demo videos. WebM format is supported by most modern browsers.*
 
 ## Features
 
