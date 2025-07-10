@@ -365,7 +365,7 @@ class TrajectoryGenerator:
 
 
 def create_trajectory_from_waypoints(waypoints: List[Tuple[float, float]],
-                                   velocity_profile: str = 'trapezoidal',
+                                   velocity_profile: str = 'trapezoidal', # 'trapezoidal', 'constant', 'sine'
                                    max_velocity: float = 1.0,
                                    acceleration: float = 0.5,
                                    deceleration: float = 0.5,
@@ -421,8 +421,8 @@ def example_usage():
     
     # Generate time-parameterized trajectory
     trajectory_data = generator.generate_time_parameterized_trajectory(
-        velocity_profile='trapezoidal',
-        max_velocity=1.5,
+        velocity_profile='trapezoidal', # 'trapezoidal', 'constant', 'sine'
+        max_velocity=1.5, 
         acceleration=0.8,
         deceleration=0.8,
         dt=0.1

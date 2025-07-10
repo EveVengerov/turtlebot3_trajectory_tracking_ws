@@ -3,11 +3,12 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, Point, PoseStamped
 from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry
-from std_srvs.srv import SetBool
-from geometry_msgs.msg import Point
+from nav_msgs.msg import Odometry, Path, OccupancyGrid
+from std_msgs.msg import Header
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import PoseArray, Pose
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -35,7 +36,8 @@ class HistogramWindowObstacleAvoidance:
     """
     
     def __init__(self, robot_radius: float = ROBOT_RADIUS, safety_margin: float = SAFETY_MARGIN,
-                 num_sectors: int = NUM_SECTORS, scan_angle: float = SCAN_ANGLE, range_max: float = RANGE_MAX):
+                 num_sectors: int = NUM_SECTORS, scan_angle: float = SCAN_ANGLE, range_max: float = RANGE_MAX,
+                 logger=None):
         """
         Initialize the HistogramWindowObstacleAvoidance class.
         
@@ -45,6 +47,7 @@ class HistogramWindowObstacleAvoidance:
             num_sectors: Number of sectors in the histogram
             scan_angle: Total scan angle in degrees
             range_max: Maximum range for the sensor
+            logger: ROS 2 logger instance for logging
         """
         self.robot_radius = robot_radius
         self.safety_margin = safety_margin
@@ -52,12 +55,26 @@ class HistogramWindowObstacleAvoidance:
         self.scan_angle = scan_angle
         self.range_max = range_max
         self.effective_radius = robot_radius + safety_margin
+        self.logger = logger
         
         # Initialize occupancy grid
         self.occupancy_grid = None
         self.grid_size = 2.0  # 2.0 meters around the robot center
         self.resolution = 0.15  # Cell size (0.15 meters)
         
+        # Previous steering state for hysteresis
+        self.prev_steering_idx = 0
+        self.prev_steering_direction = "STRAIGHT"
+    
+    def _log(self, level: str, message: str):
+        """Safely log messages if logger is available."""
+        if self.logger is not None:
+            if level == "debug":
+                self.logger.debug(message)
+            elif level == "info":
+                self.logger.info(message)
+            elif level == "warn":
+                self.logger.warn(message)
     
     def update_occupancy_grid(self, scan_data: List[float]) -> None:
         """
@@ -98,7 +115,7 @@ class HistogramWindowObstacleAvoidance:
         if self.occupancy_grid is not None and np.any(self.occupancy_grid):
             for nx in range(grid_size_cells):
                 for ny in range(grid_size_cells):
-                    self.occupancy_grid[nx, ny] = (self.occupancy_grid[nx, ny] * 0.5 + grid[nx, ny]) / 1.0
+                    self.occupancy_grid[nx, ny] = (self.occupancy_grid[nx, ny] * 0.9 + grid[nx, ny]) / 1.9
         else:
             self.occupancy_grid = grid
     
@@ -323,6 +340,14 @@ class TurtleBotHistogramWindowController(Node):
         # Publisher for velocity commands
         self.publisher_ = self.create_publisher(Twist, '/cmd_vel', 10)
 
+        # Visualization publishers
+        self.occupancy_grid_pub = self.create_publisher(OccupancyGrid, '/occupancy_grid', 10)
+        self.waypoint_pub = self.create_publisher(PoseStamped, '/current_waypoint', 10)
+        self.robot_path_pub = self.create_publisher(Path, '/robot_path', 10)
+        self.target_marker_pub = self.create_publisher(Marker, '/target_marker', 10)
+        self.waypoint_marker_pub = self.create_publisher(Marker, '/waypoint_marker', 10)
+        self.robot_pose_marker_pub = self.create_publisher(Marker, '/robot_pose_marker', 10)
+
         # LIDAR subscription
         self.scan_subscription = self.create_subscription(
             LaserScan,
@@ -340,7 +365,7 @@ class TurtleBotHistogramWindowController(Node):
         )
 
         # Initialize the obstacle avoidance class
-        self.obstacle_avoidance = HistogramWindowObstacleAvoidance()
+        self.obstacle_avoidance = HistogramWindowObstacleAvoidance(logger=self.get_logger())
 
         # Control Parameters
         self.kp_linear = 0.5  # Linear velocity proportional gain
@@ -365,9 +390,16 @@ class TurtleBotHistogramWindowController(Node):
         self.scan_data = None
         self.odom_data = None
 
+        # Robot path tracking
+        self.robot_path_poses = [] # Changed from self.robot_path
+        self.path_counter = 0
+
         # Initialize interactive plotting
         plt.ion()
         self.fig, self.ax = plt.subplots(1, 2, figsize=(12, 6))
+        
+        # Timer for visualization updates
+        self.viz_timer = self.create_timer(0.1, self.publish_visualization)  # 10 Hz
 
     def set_target_position(self, x: float, y: float):
         """Set the target position for the robot to navigate to"""
@@ -448,6 +480,10 @@ class TurtleBotHistogramWindowController(Node):
                 # In debug mode, use the original target angle
                 target_theta_difference = target_theta_base_link
                 self.get_logger().info(f'Debug mode: using original target angle {np.degrees(target_theta):.1f}°')
+                
+                # Update occupancy grid even in debug mode for visualization
+                if self.scan_data is not None:
+                    self.obstacle_avoidance.update_occupancy_grid(self.scan_data)
 
             # Calculate control errors
             angular_error = target_theta_difference
@@ -500,6 +536,9 @@ class TurtleBotHistogramWindowController(Node):
                         f'({100*occupied_cells/total_cells:.1f}%)'
                     )
 
+            # Publish visualization data
+            self.publish_waypoint(self.target_x, self.target_y)
+
         except Exception as e:
             self.get_logger().warn(f"Failed to calculate control: {e}")
             self.publish_velocity(0.0, 0.0)  # Stop robot if there's an issue
@@ -514,6 +553,220 @@ class TurtleBotHistogramWindowController(Node):
         """Publishes a zero-velocity message to stop the vehicle."""
         self.publish_velocity(0.0, 0.0)
         self.get_logger().info('Published stop command: linear=0.0, angular=0.0')
+
+    def publish_occupancy_grid(self):
+        """Publish the occupancy grid for visualization."""
+        if self.obstacle_avoidance.occupancy_grid is None:
+            return
+            
+        # Create OccupancyGrid message
+        grid_msg = OccupancyGrid()
+        grid_msg.header.frame_id = "map"  # Changed from base_link to map
+        grid_msg.header.stamp = self.get_clock().now().to_msg()
+        
+        # Set grid metadata
+        grid_msg.info.resolution = self.obstacle_avoidance.resolution
+        grid_msg.info.width = self.obstacle_avoidance.occupancy_grid.shape[0]
+        grid_msg.info.height = self.obstacle_avoidance.occupancy_grid.shape[1]
+        
+        # Set origin in map frame (center of the grid at robot's current position)
+        if self.current_pose is not None:
+            grid_msg.info.origin.position.x = self.current_pose['x'] - self.obstacle_avoidance.grid_size / 2
+            grid_msg.info.origin.position.y = self.current_pose['y'] - self.obstacle_avoidance.grid_size / 2
+        else:
+            grid_msg.info.origin.position.x = -self.obstacle_avoidance.grid_size / 2
+            grid_msg.info.origin.position.y = -self.obstacle_avoidance.grid_size / 2
+        grid_msg.info.origin.position.z = 0.0
+        grid_msg.info.origin.orientation.w = 1.0
+        
+        # Convert grid to occupancy data (0-100)
+        # Invert the grid so that occupied cells are 100 and free cells are 0
+        grid_data = self.obstacle_avoidance.occupancy_grid.copy()
+        grid_data = (grid_data * 100).astype(np.int8)
+        # Ensure values are in valid range [0, 100]
+        grid_data = np.clip(grid_data, 0, 100)
+        
+        # # Flip the y-axis by mirroring along the x-axis
+        # grid_data = np.flipud(grid_data)
+
+        # # flip the x-axis by mirroring along the y-axis
+        # grid_data = np.fliplr(grid_data)
+        
+        grid_msg.data = grid_data.flatten().tolist()
+        
+        # Debug information
+        occupied_cells = np.sum(grid_data > 0)
+        total_cells = len(grid_msg.data)
+        self.get_logger().debug(f"Occupancy Grid: {occupied_cells}/{total_cells} cells occupied, "
+                               f"resolution={grid_msg.info.resolution}, "
+                               f"size={grid_msg.info.width}x{grid_msg.info.height}, "
+                               f"origin=({grid_msg.info.origin.position.x:.2f}, {grid_msg.info.origin.position.y:.2f})")
+        
+        self.occupancy_grid_pub.publish(grid_msg)
+    
+    def publish_waypoint_marker(self, x: float, y: float, waypoint_id: int = 0):
+        """Publish waypoint position as a marker for visualization."""
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "waypoint"
+        marker.id = waypoint_id
+        marker.type = Marker.CYLINDER
+        marker.action = Marker.ADD
+        
+        # Set position
+        marker.pose.position.x = x
+        marker.pose.position.y = y
+        marker.pose.position.z = 0.0
+        marker.pose.orientation.w = 1.0
+        
+        # Set scale and color (blue for waypoints)
+        marker.scale.x = 0.2
+        marker.scale.y = 0.2
+        marker.scale.z = 0.1
+        marker.color.r = 0.0
+        marker.color.g = 0.0
+        marker.color.b = 1.0
+        marker.color.a = 0.8
+        
+        self.waypoint_marker_pub.publish(marker)
+    
+    def publish_waypoint(self, x: float, y: float):
+        """Publish current waypoint for visualization."""
+        waypoint_msg = PoseStamped()
+        waypoint_msg.header.frame_id = "map"
+        waypoint_msg.header.stamp = self.get_clock().now().to_msg()
+        waypoint_msg.pose.position.x = x
+        waypoint_msg.pose.position.y = y
+        waypoint_msg.pose.position.z = 0.0
+        waypoint_msg.pose.orientation.w = 1.0
+        
+        self.waypoint_pub.publish(waypoint_msg)
+        
+        # Also publish as marker
+        self.publish_waypoint_marker(x, y)
+    
+    def publish_visualization(self):
+        """Publish all visualization data."""
+        # Publish occupancy grid
+        if self.obstacle_avoidance.occupancy_grid is not None:
+            self.publish_occupancy_grid()
+            self.get_logger().debug("Published occupancy grid")
+        else:
+            self.get_logger().debug("No occupancy grid available for publishing")
+        
+        # Publish target marker
+        self.publish_target_marker()
+        
+        # Publish robot pose marker
+        self.publish_robot_pose_marker()
+        
+        # Publish robot path
+        self.publish_robot_path()
+    
+    def publish_robot_path(self):
+        """Publish robot path for visualization."""
+        if self.current_pose is None:
+            return
+            
+        # Add current pose to path
+        pose_stamped = PoseStamped()
+        pose_stamped.header.frame_id = "map"
+        pose_stamped.header.stamp = self.get_clock().now().to_msg()
+        pose_stamped.pose.position.x = self.current_pose['x']
+        pose_stamped.pose.position.y = self.current_pose['y']
+        pose_stamped.pose.position.z = 0.0
+        
+        # Convert yaw to quaternion
+        yaw = self.current_pose['theta']
+        pose_stamped.pose.orientation.x = 0.0
+        pose_stamped.pose.orientation.y = 0.0
+        pose_stamped.pose.orientation.z = math.sin(yaw / 2.0)
+        pose_stamped.pose.orientation.w = math.cos(yaw / 2.0)
+        
+        # Create new path with current pose
+        path_msg = Path()
+        path_msg.header.frame_id = "map"
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        
+        # Add existing poses
+        if hasattr(self, 'robot_path_poses'):
+            path_msg.poses = self.robot_path_poses + [pose_stamped]
+        else:
+            path_msg.poses = [pose_stamped]
+            self.robot_path_poses = []
+        
+        # Store poses for next iteration
+        self.robot_path_poses = path_msg.poses
+        
+        # Limit path length to prevent memory issues
+        if len(self.robot_path_poses) > 1000:
+            self.robot_path_poses = self.robot_path_poses[-500:]
+        
+        self.robot_path_pub.publish(path_msg)
+    
+    def publish_target_marker(self):
+        """Publish target position as a marker for visualization."""
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "target"
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        
+        # Set position
+        marker.pose.position.x = self.target_x
+        marker.pose.position.y = self.target_y
+        marker.pose.position.z = 0.0
+        marker.pose.orientation.w = 1.0
+        
+        # Set scale and color
+        marker.scale.x = 0.3
+        marker.scale.y = 0.3
+        marker.scale.z = 0.3
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 0.8
+        
+        self.target_marker_pub.publish(marker)
+    
+    def publish_robot_pose_marker(self):
+        """Publish robot pose as a marker for visualization."""
+        if self.current_pose is None:
+            return
+            
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "robot_pose"
+        marker.id = 0
+        marker.type = Marker.ARROW
+        marker.action = Marker.ADD
+        
+        # Set position
+        marker.pose.position.x = self.current_pose['x']
+        marker.pose.position.y = self.current_pose['y']
+        marker.pose.position.z = 0.0
+        
+        # Set orientation (convert yaw to quaternion)
+        yaw = self.current_pose['theta']
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = math.sin(yaw / 2.0)
+        marker.pose.orientation.w = math.cos(yaw / 2.0)
+        
+        # Set scale and color (red arrow pointing in robot's direction)
+        marker.scale.x = 0.5  # Arrow length
+        marker.scale.y = 0.1  # Arrow width
+        marker.scale.z = 0.1  # Arrow height
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 0.8
+        
+        self.robot_pose_marker_pub.publish(marker)
 
 def main(args=None):
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
