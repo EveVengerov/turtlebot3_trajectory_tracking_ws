@@ -59,7 +59,7 @@ def generate_launch_description():
         # Launch arguments for controller
         DeclareLaunchArgument(
             'controller_type',
-            default_value='stanley',
+            default_value='pure_pursuit',
             description='Controller type: pure_pursuit, pid, stanley'
         ),
         
