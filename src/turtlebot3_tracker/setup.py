@@ -25,11 +25,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'trajectory_generator = turtlebot3_tracker.trajectory_generator:main',
-            'trajectory_publisher = turtlebot3_tracker.trajectory_pub:main_ros',
-            'trajectory_service = turtlebot3_tracker.trajectory_pub:main_service',
-            'trajectory_client = turtlebot3_tracker.trajectory_pub:main_client',
-            'trajectory_publisher_node = turtlebot3_tracker.trajectory_publisher_node:main',
+            'trajectory_tracker_with_obstacle_avoidance_node = turtlebot3_tracker.trajectory_tracker_with_obstacle_avoidance_node:main',
+            'trajectory_publisher_node = turtlebot3_tracker.trajectory_tracker_node:main',
             'controller_debug_publisher_node = turtlebot3_tracker.controller_debug_publisher_node:main',
         ],
     },
